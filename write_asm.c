@@ -1,5 +1,7 @@
 #include "stdafx.h"
 #include "write_asm.h"
+#pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "Psapi.lib")
 
 extern OPTIONS options;
 
@@ -87,7 +89,7 @@ static TCHAR *TextToData(LABEL_HEAD *p_label_head, CMD_BLOCK_HEAD *p_cmd_block_h
 
 				lpBlockDeclaration = p;
 
-				result = AddressToData(p_cmd_block_head, &cmd_block_node, &dwAddress, &dwEndAddress, &dwBaseAddress, p, lpError);
+				result = AddressToData(p_label_head, p_cmd_block_head, &cmd_block_node, &dwAddress, &dwEndAddress, &dwBaseAddress, p, lpError);
 				break;
 
 			case _T('@'): // label
@@ -120,16 +122,18 @@ static TCHAR *TextToData(LABEL_HEAD *p_label_head, CMD_BLOCK_HEAD *p_cmd_block_h
 	return NULL;
 }
 
-static LONG_PTR AddressToData(CMD_BLOCK_HEAD *p_cmd_block_head, CMD_BLOCK_NODE **p_cmd_block_node,
+static LONG_PTR AddressToData(LABEL_HEAD *p_label_head, CMD_BLOCK_HEAD *p_cmd_block_head, CMD_BLOCK_NODE **p_cmd_block_node,
 	DWORD_PTR *pdwAddress, DWORD_PTR *pdwEndAddress, DWORD_PTR *pdwBaseAddress, TCHAR *lpText, TCHAR *lpError)
 {
 	DWORD_PTR dwAddress;
+    BOOL bFromAlloc;
+    SIZE_T nAllocSize;
 
-	LONG_PTR result = ParseAddress(lpText, &dwAddress, pdwEndAddress, pdwBaseAddress, lpError);
+	LONG_PTR result = ParseAddress(p_label_head, lpText, &dwAddress, &bFromAlloc, &nAllocSize, pdwEndAddress, pdwBaseAddress, lpError);
 	if(result <= 0)
 		return result;
 
-	if(!NewCmdBlock(p_cmd_block_head, dwAddress, lpError))
+	if(!NewCmdBlock(p_cmd_block_head, dwAddress, bFromAlloc, nAllocSize, lpError))
 		return 0;
 
 	*p_cmd_block_node = p_cmd_block_head->last;
@@ -309,7 +313,7 @@ static BOOL IsInComment(TCHAR *pchCommentChar, TCHAR *lpText, TCHAR *lpError)
 	return TRUE;
 }
 
-static LONG_PTR ParseAddress(TCHAR *lpText, DWORD_PTR *pdwAddress, DWORD_PTR *pdwEndAddress, DWORD_PTR *pdwBaseAddress, TCHAR *lpError)
+static LONG_PTR ParseAddress(LABEL_HEAD *p_label_head, TCHAR *lpText, DWORD_PTR *pdwAddress, BOOL* bFromAlloc, SIZE_T* pnAllocSize, DWORD_PTR *pdwEndAddress, DWORD_PTR *pdwBaseAddress, TCHAR *lpError)
 {
 	TCHAR *p;
 	DWORD_PTR dwAddress, dwBaseAddress;
@@ -330,10 +334,19 @@ static LONG_PTR ParseAddress(TCHAR *lpText, DWORD_PTR *pdwAddress, DWORD_PTR *pd
 	// Start address
 	if(*p == _T('$'))
 	{
+        *bFromAlloc = FALSE;
 		result = ParseRVAAddress(p, &dwAddress, *pdwBaseAddress, &dwBaseAddress, lpError);
 	}
+    // cexe
+    else if (*p == _T('&'))
+    {
+        *bFromAlloc = TRUE;
+        dwBaseAddress = 0;
+        result = AllocAddress(p_label_head, p, &dwAddress, pnAllocSize, lpError);
+    }
 	else
 	{
+        *bFromAlloc = FALSE;
 		dwBaseAddress = 0;
 		result = ParseDWORDPtr(p, &dwAddress, lpError);
 	}
@@ -396,7 +409,7 @@ static LONG_PTR ParseAddress(TCHAR *lpText, DWORD_PTR *pdwAddress, DWORD_PTR *pd
 	return p-lpText;
 }
 
-static BOOL NewCmdBlock(CMD_BLOCK_HEAD *p_cmd_block_head, DWORD_PTR dwAddress, TCHAR *lpError)
+static BOOL NewCmdBlock(CMD_BLOCK_HEAD *p_cmd_block_head, DWORD_PTR dwAddress, BOOL bFromAlloc, SIZE_T nSize, TCHAR *lpError)
 {
 	CMD_BLOCK_NODE *cmd_block_node;
 
@@ -407,6 +420,8 @@ static BOOL NewCmdBlock(CMD_BLOCK_HEAD *p_cmd_block_head, DWORD_PTR dwAddress, T
 		return FALSE;
 	}
 
+    cmd_block_node->bAddressFromVirtualAlloc = bFromAlloc;
+    cmd_block_node->nAddressAllocSize = nSize;
 	cmd_block_node->dwAddress = dwAddress;
 	cmd_block_node->nSize = 0;
 	cmd_block_node->cmd_head.next = NULL;
@@ -454,7 +469,6 @@ static LONG_PTR ParseAnonLabel(TCHAR *lpText, DWORD_PTR dwAddress, ANON_LABEL_HE
 	}
 
 	anon_label_node->dwAddress = dwAddress;
-
 	anon_label_node->next = NULL;
 
 	p_anon_label_head->last->next = anon_label_node;
@@ -482,6 +496,13 @@ static LONG_PTR ParseLabel(TCHAR *lpText, DWORD_PTR dwAddress, LABEL_HEAD *p_lab
 
 	p++;
 	lpLabel = p;
+
+    if (!(*p >= _T('a') && *p <= _T('z')) &&
+        !(*p >= _T('A') && *p <= _T('Z')))
+    {
+        lstrcpy(lpError, _T("Label name must starts with [a-zA-Z] charactors"));
+        return -(p - lpText);
+    }
 
 	if(
 		(*p < _T('0') || *p > _T('9')) && 
@@ -554,6 +575,7 @@ static LONG_PTR ParseLabel(TCHAR *lpText, DWORD_PTR dwAddress, LABEL_HEAD *p_lab
 	}
 
 	label_node->dwAddress = dwAddress + dwPaddingSize;
+    label_node->bAddressFromVisualAlloc = FALSE;
 	label_node->lpLabel = lpLabel;
 
 	label_node->next = NULL;
@@ -1536,6 +1558,65 @@ static LONG_PTR ParseUnicodeString(TCHAR *lpText, CMD_HEAD *p_cmd_head, SIZE_T *
 	return p-lpText;
 }
 
+static LONG_PTR FallbackJmpToPushRet(TCHAR* lpCommandWithoutLabels, DWORD_PTR dwAddress, BYTE* bCode, TCHAR* lpError)
+{
+    int nReturnCodeSize = 0;
+
+    TCHAR ch = 0;
+    BOOL isJmp = FALSE;
+    BOOL isCall = FALSE;
+
+    ch = lpCommandWithoutLabels[3];
+    lpCommandWithoutLabels[3] = 0;
+    isJmp = stricmp(lpCommandWithoutLabels, "jmp") == 0;
+    lpCommandWithoutLabels[3] = ch;
+
+    //ch = lpCommandWithoutLabels[4];
+    //lpCommandWithoutLabels[4] = 0;
+    //isCall = stricmp(lpCommandWithoutLabels, "call") == 0;
+    //lpCommandWithoutLabels[4] = ch;
+    if (isJmp)
+    {
+        const TCHAR* pTargetAddress = SkipSpaces(lpCommandWithoutLabels + 4);
+        DWORD dwLowerAddress = 0;
+        DWORD dwHighAddress = 0;
+        int nAsmCodeSize = 0;
+        int nTotalCodeSize = 0;
+        DWORD_PTR dwTargetAddress = 0;
+        ParseDWORDPtr(pTargetAddress, &dwTargetAddress, lpError);
+        //lstrcpy(szAddress, pTargetAddress);
+        dwLowerAddress = ((DWORD)(dwTargetAddress));
+        dwHighAddress = ((DWORD)(((dwTargetAddress) >> 32) & 0xffffffff));
+
+        //HeapFree(GetProcessHeap(), 0, lpCommandWithoutLabels);
+        lpCommandWithoutLabels = HeapAlloc(GetProcessHeap(), 0, 100);
+        memset(lpCommandWithoutLabels, 0, 100);
+
+        sprintf(lpCommandWithoutLabels, "push 0x%08x", dwLowerAddress);
+        nAsmCodeSize = AssembleWithGivenSize(lpCommandWithoutLabels, dwAddress + nTotalCodeSize, 100 - nTotalCodeSize, bCode + nTotalCodeSize, lpError);
+        if (nAsmCodeSize > 0)
+        {
+            nTotalCodeSize += nAsmCodeSize;
+            sprintf(lpCommandWithoutLabels, "mov dword ptr [rsp+4], 0x%08x", dwHighAddress);
+            nAsmCodeSize = AssembleWithGivenSize(lpCommandWithoutLabels, dwAddress + nTotalCodeSize, 100 - nTotalCodeSize, bCode + nTotalCodeSize, lpError);
+            if (nAsmCodeSize > 0)
+            {
+                nTotalCodeSize += nAsmCodeSize;
+                sprintf(lpCommandWithoutLabels, "ret");
+                nAsmCodeSize = AssembleWithGivenSize(lpCommandWithoutLabels, dwAddress + nTotalCodeSize, 100 - nTotalCodeSize, bCode + nTotalCodeSize, lpError);
+                if (nAsmCodeSize > 0)
+                {
+                    nTotalCodeSize += nAsmCodeSize;
+                    nReturnCodeSize = nTotalCodeSize;
+                }
+            }
+        }
+        HeapFree(GetProcessHeap(), 0, lpCommandWithoutLabels);
+    }
+
+    return nReturnCodeSize;
+}
+
 static LONG_PTR ParseCommand(TCHAR *lpText, DWORD_PTR dwAddress, DWORD_PTR dwBaseAddress, CMD_HEAD *p_cmd_head, SIZE_T *pnSizeInBytes, TCHAR *lpError)
 {
 	CMD_NODE *cmd_node;
@@ -1602,6 +1683,10 @@ static LONG_PTR ParseCommand(TCHAR *lpText, DWORD_PTR dwAddress, DWORD_PTR dwBas
 		else
 		{
 			result = AssembleShortest(lpResolvedCommand, dwAddress, bCode, lpError);
+        #if defined(_WIN64)
+            if (result <= 0)
+                result = FallbackJmpToPushRet(lpResolvedCommand, dwAddress, bCode, lpError);
+        #endif
 			result = ReplacedTextCorrectErrorSpot(lpText, lpResolvedCommand, result);
 		}
 	}
@@ -2013,7 +2098,202 @@ static BOOL InsertBytes(TCHAR *lpText, SIZE_T nBytesCount, BYTE bByteValue, CMD_
 	return TRUE;
 }
 
-static LONG_PTR ParseRVAAddress(TCHAR *lpText, DWORD_PTR *pdwAddress, DWORD_PTR dwParentBaseAddress, DWORD_PTR *pdwBaseAddress, TCHAR *lpError)
+//static HMODULE GetProcessExeModule(HANDLE hProcess)
+//{
+//    HMODULE hMods[1024];
+//    HANDLE pHandle = hProcess;
+//    DWORD cbNeeded;
+//    unsigned int i;
+//
+//    if (EnumProcessModules(pHandle, hMods, sizeof(hMods), &cbNeeded))
+//    {
+//        for (i = 0; i < (cbNeeded / sizeof(HMODULE)); i++)
+//        {
+//            TCHAR szModName[MAX_PATH];
+//            if (GetModuleFileNameEx(pHandle, hMods[i], szModName, sizeof(szModName) / sizeof(TCHAR)))
+//            {
+//                int nModeNameLen = _tcslen(szModName);
+//                if (nModeNameLen > 4 &&
+//                    szModName[nModeNameLen - 1] == _T('e') &&
+//                    szModName[nModeNameLen - 2] == _T('x') &&
+//                    szModName[nModeNameLen - 3] == _T('e') &&
+//                    szModName[nModeNameLen - 4] == _T('.'))
+//                {
+//                    CloseHandle(pHandle);
+//                    return hMods[i];
+//                }
+//            }
+//        }
+//    }
+//    return NULL;
+//}
+
+BOOL CALLBACK _PSYM_ENUMMODULES_CALLBACK(
+    __in PCSTR ModuleName,
+    __in DWORD BaseOfDll,
+    __in_opt PVOID UserContext
+    )
+{
+    *(DWORD*)UserContext = BaseOfDll;
+    return FALSE;
+}
+
+
+static LONG_PTR AllocAddress(LABEL_HEAD *p_label_head, TCHAR *lpText, DWORD_PTR *pdwAddress, SIZE_T* pAllocSize, TCHAR *lpError)
+{
+    TCHAR *p;
+    TCHAR *pAddressNameStart, *pAddressNameEnd;
+    TCHAR *pSizeStart, *pSizeEnd;
+    PLUGIN_MODULE module;
+    DWORD_PTR dwAddress;
+    int dwAddressSize;
+    LONG_PTR result;
+    TCHAR c;
+    TCHAR szSize[20];
+    TCHAR szName[20];
+    LABEL_NODE* label_node;
+    int bHasInvalidNameChar;
+
+    p = lpText;
+
+    if (*p != _T('&'))
+    {
+        lstrcpy(lpError, _T("Could not allocate address, '&' expected"));
+        return -(p - lpText);
+    }
+
+    p ++;
+    p = SkipSpaces(p);
+
+    if (!(*p >= _T('a') && *p <= _T('z')) &&
+        !(*p >= _T('A') && *p <= _T('Z')))
+    {
+        lstrcpy(lpError, _T("Allocate address name must starts with [a-zA-Z] charactors"));
+        return -(p - lpText);
+    }
+
+    memset(szName, 0, sizeof(szName));
+    pAddressNameStart = p;
+    bHasInvalidNameChar = 0;
+    while (*p && *p != _T('='))
+    {
+        if ( !(*p >= _T('0') && *p <= _T('9')) &&
+             !(*p >= _T('a') && *p <= _T('z')) &&
+             !(*p >= _T('A') && *p <= _T('Z')) &&
+             !(*p == _T('_')))
+        {
+            bHasInvalidNameChar = 1;
+            break;
+        }
+        ++ p;
+    }
+    if (bHasInvalidNameChar)
+    {
+        lstrcpy(lpError, _T("Allocate address name accept only [a-zA-Z0-9] charactors"));
+        return -(p - lpText);
+    }
+
+    pAddressNameEnd = p;
+    if (pAddressNameEnd - pAddressNameStart < 4)
+    {
+        lstrcpy(lpError, _T("Allocate address name requires at least 4 charactors"));
+        return -(p - lpText);
+    }
+    _tcsncpy(szName, pAddressNameStart, pAddressNameEnd - pAddressNameStart);
+
+    pSizeStart = NULL;
+    if (*p == _T('='))
+    {
+        ++ p;
+        pSizeStart = p;
+    }
+
+    while (*p && *p != _T('>'))
+        ++p;
+    if (*p != _T('>'))
+    {
+        lstrcpy(lpError, _T("Invalid allocate address syntax, ending '>' expected"));
+        return -(p - lpText);
+    }
+
+    memset(szSize, 0, sizeof(szSize));
+    dwAddressSize = 1024;
+    if (pSizeStart && p > pSizeStart)
+    {
+        pSizeEnd = p;
+        _tcsncpy(szSize, pSizeStart, pSizeEnd - pSizeStart);
+        dwAddressSize = _ttoi(szSize);
+        if (dwAddressSize < 100)
+            dwAddressSize = 100;
+    }
+
+    for (label_node = p_label_head->next; label_node != NULL; label_node = label_node->next)
+    {
+        if (lstrcmp(szName, label_node->lpLabel) == 0)
+        {
+            wsprintf(lpError, _T("Label '%s' redefinition"), szName);
+            return 0;
+        }
+    }
+
+    label_node = (LABEL_NODE *)HeapAlloc(GetProcessHeap(), 0, sizeof(LABEL_NODE));
+    if (!label_node)
+    {
+        lstrcpy(lpError, _T("Allocation failed"));
+        return 0;
+    }
+
+    {
+        HANDLE hDebugeeProcessHandle;
+        int dwDebugeeProcessId;
+        DWORD_PTR hDebugeeProcessMem;
+
+    #if defined(_WIN64)
+        DWORD_PTR hDebugeeProcessModuleBase;
+    #else
+        DWORD hDebugeeProcessModuleBase;
+    #endif
+
+        MEMORY_BASIC_INFORMATION info;
+
+        PLUGIN_MODULE hDebugeeProcessModule;
+
+        dwDebugeeProcessId = GetDebugeeProcessId();
+        hDebugeeProcessHandle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwDebugeeProcessId);
+        if (!hDebugeeProcessHandle)
+        {
+            wsprintf(lpError, _T("OpenProcess '%d' failed, error=%d"), dwDebugeeProcessId, GetLastError());
+            return 0;
+        }
+
+        hDebugeeProcessMem = (DWORD_PTR)VirtualAllocEx(hDebugeeProcessHandle, NULL, dwAddressSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        if (!hDebugeeProcessMem)
+        {
+            wsprintf(lpError, _T("VirtualAllocEx in process %d failed, error=%d"), dwDebugeeProcessId, GetLastError());
+            return 0;
+        }
+
+        label_node->dwAddress = hDebugeeProcessMem;
+        label_node->bAddressFromVisualAlloc = TRUE;
+        CloseHandle(hDebugeeProcessHandle);
+    }
+
+    label_node->lpLabel = (TCHAR*)malloc(lstrlen(szName) + 1);
+    lstrcpy(label_node->lpLabel, szName);
+
+    label_node->next = NULL;
+
+    p_label_head->last->next = label_node;
+    p_label_head->last = label_node;
+
+    *pdwAddress = label_node->dwAddress;
+    *pAllocSize = dwAddressSize;
+
+    return p - lpText;
+}
+
+
+static LONG_PTR ParseRVAAddress(TCHAR *lpText, DWORD_PTR *pdwAddress, DWORD_PTR dwParentBaseAddress, DWORD_PTR *pdwBaseAddress,  TCHAR *lpError)
 {
 	TCHAR *p;
 	TCHAR *pModuleName, *pModuleNameEnd;
@@ -2181,7 +2461,8 @@ static LONG_PTR ParseDWORDPtr(TCHAR *lpText, DWORD_PTR *pdw, TCHAR *lpError)
 
 	if((*p < _T('0') || *p > _T('9')) && (*p < _T('A') || *p > _T('F')) && (*p < _T('a') || *p > _T('f')))
 	{
-		lstrcpy(lpError, _T("Could not parse constant"));
+		lstrcpy(lpError, _T("Could not parse constant at"));
+        lstrcat(lpError, p);
 		return -(p-lpText);
 	}
 
@@ -2252,6 +2533,8 @@ static TCHAR *ReplaceLabelsInCommands(LABEL_HEAD *p_label_head, CMD_BLOCK_HEAD *
 
 		for(cmd_node = cmd_block_node->cmd_head.next; cmd_node != NULL; cmd_node = cmd_node->next)
 		{
+            int nCodeSizeOld = cmd_node->nCodeSize;
+
 			while(dwNextAnonAddr && dwNextAnonAddr <= dwAddress)
 			{
 				dwPrevAnonAddr = dwNextAnonAddr;
@@ -2283,6 +2566,18 @@ static TCHAR *ReplaceLabelsInCommands(LABEL_HEAD *p_label_head, CMD_BLOCK_HEAD *
 				}
 
 				result = AssembleWithGivenSize(lpCommandWithoutLabels, dwAddress, (int)cmd_node->nCodeSize, bCode, lpError);
+        #if defined(_WIN64)
+                if (result <= 0)
+                {
+                    result = FallbackJmpToPushRet(lpCommandWithoutLabels, dwAddress, bCode, lpError);
+                    if (result > 0)
+                    {
+                        HeapFree(GetProcessHeap(), 0, cmd_node->bCode);
+                        cmd_node->bCode = HeapAlloc(GetProcessHeap(), 0, result);
+                        cmd_node->nCodeSize = result;
+                    }
+                }
+            #endif
 				result = ReplacedTextCorrectErrorSpot(cmd_node->lpCommand, lpCommandWithoutLabels, result);
 				HeapFree(GetProcessHeap(), 0, lpCommandWithoutLabels);
 
@@ -2293,6 +2588,7 @@ static TCHAR *ReplaceLabelsInCommands(LABEL_HEAD *p_label_head, CMD_BLOCK_HEAD *
 			}
 
 			dwAddress += cmd_node->nCodeSize;
+            cmd_block_node->nSize += (cmd_node->nCodeSize - nCodeSizeOld);
 		}
 	}
 
@@ -2426,14 +2722,22 @@ static TCHAR *PatchCommands(CMD_BLOCK_HEAD *p_cmd_block_head, TCHAR *lpError)
 		if(cmd_block_node->nSize > 0)
 		{
 			memory = FindMemory(cmd_block_node->dwAddress);
-			if(!memory)
+			if(!memory && !cmd_block_node->bAddressFromVirtualAlloc)
 			{
 				wsprintf(lpError, _T("Failed to find memory block for address 0x" HEXPTR_PADDED), cmd_block_node->dwAddress);
 				return cmd_block_node->cmd_head.next->lpCommand;
 			}
 
-			dwMemoryBase = GetMemoryBase(memory);
-			nMemorySize = GetMemorySize(memory);
+            if (cmd_block_node->bAddressFromVirtualAlloc)
+            {
+                dwMemoryBase = cmd_block_node->dwAddress;
+                nMemorySize = cmd_block_node->nAddressAllocSize;
+            }
+            else
+            {
+                dwMemoryBase = GetMemoryBase(memory);
+                nMemorySize = GetMemorySize(memory);
+            }
 
 			if(cmd_block_node->dwAddress + cmd_block_node->nSize > dwMemoryBase + nMemorySize)
 			{

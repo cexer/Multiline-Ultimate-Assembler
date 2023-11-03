@@ -155,7 +155,7 @@ int AssembleShortest(TCHAR *lpCommand, DWORD_PTR dwAddress, BYTE *bBuffer, TCHAR
 
 int AssembleWithGivenSize(TCHAR *lpCommand, DWORD_PTR dwAddress, int nReqSize, BYTE *bBuffer, TCHAR *lpError)
 {
-	int size;
+	int size = 0;
 	if(!DbgFunctions()->Assemble(dwAddress, bBuffer, &size, lpCommand, lpError))
 		return 0;
 
@@ -166,8 +166,8 @@ int AssembleWithGivenSize(TCHAR *lpCommand, DWORD_PTR dwAddress, int nReqSize, B
 		return 0;
 	}
 
-	while(size < nReqSize)
-		bBuffer[size++] = 0x90; // Fill with NOPs
+	//while(size < nReqSize)
+	//	bBuffer[size++] = 0x90; // Fill with NOPs
 
 	return size;
 }

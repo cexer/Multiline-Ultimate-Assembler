@@ -53,6 +53,7 @@ DWORD_PTR GetModuleBase(PLUGIN_MODULE module);
 SIZE_T GetModuleSize(PLUGIN_MODULE module);
 BOOL GetModuleName(PLUGIN_MODULE module, TCHAR *pszModuleName);
 BOOL IsModuleWithRelocations(PLUGIN_MODULE module);
+int GetDebugeeProcessId();
 
 // Memory functions
 PLUGIN_MEMORY FindMemory(DWORD_PTR dwAddress);
