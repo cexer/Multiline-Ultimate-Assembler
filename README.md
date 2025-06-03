@@ -28,5 +28,5 @@ Parameters:
 
 Related topics:
 
-* (Add cheat engine style auto assembler for code injection)(https://github.com/x64dbg/x64dbg/issues/729)
-* (Please add Cheat Engine like code cave management)[https://github.com/m417z/Multiline-Ultimate-Assembler/issues/1]
+* [Add cheat engine style auto assembler for code injection](https://github.com/x64dbg/x64dbg/issues/729)
+* [Please add Cheat Engine like code cave management](https://github.com/m417z/Multiline-Ultimate-Assembler/issues/1)
