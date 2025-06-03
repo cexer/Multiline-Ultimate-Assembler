@@ -6,9 +6,16 @@
 
 extern HINSTANCE hDllInst;
 
+<<<<<<< HEAD
 static int pluginHandle;
 static int hMenu;
 static int hMenuDisasm;
+=======
+static int g_pluginHandle;
+static int g_hMenu;
+static int g_hMenuDisasm;;
+static int g_dwProcessId;
+>>>>>>> 0c6b563 (support automate alloc code memory)
 
 #ifndef DLL_EXPORT
 #define DLL_EXPORT __declspec(dllexport)
@@ -31,8 +38,8 @@ static bool CmdClose(int argc, char** argv);
 DLL_EXPORT void plugsetup(PLUG_SETUPSTRUCT *setupStruct)
 {
 	hwollymain = setupStruct->hwndDlg;
-	hMenu = setupStruct->hMenu;
-	hMenuDisasm = setupStruct->hMenuDisasm;
+	g_hMenu = setupStruct->hMenu;
+	g_hMenuDisasm = setupStruct->hMenuDisasm;
 
 	HRSRC hResource = FindResource(hDllInst, MAKEINTRESOURCE(IDB_X64DBG_ICON), "PNG");
 	if(hResource)
@@ -48,20 +55,48 @@ DLL_EXPORT void plugsetup(PLUG_SETUPSTRUCT *setupStruct)
 				IconData.data = lpAddress;
 				IconData.size = dwSize;
 
-				_plugin_menuseticon(hMenu, &IconData);
-				_plugin_menuseticon(hMenuDisasm, &IconData);
+				_plugin_menuseticon(g_hMenu, &IconData);
+				_plugin_menuseticon(g_hMenuDisasm, &IconData);
 			}
 		}
 	}
 
-	_plugin_menuaddentry(hMenu, MENU_MAIN, "&Multiline Ultimate Assembler\tCtrl+M");
-	_plugin_menuaddseparator(hMenu);
-	_plugin_menuaddentry(hMenu, MENU_OPTIONS, "&Options");
-	_plugin_menuaddseparator(hMenu);
-	_plugin_menuaddentry(hMenu, MENU_HELP, "&Help");
-	_plugin_menuaddentry(hMenu, MENU_ABOUT, "&About");
+	_plugin_menuaddentry(g_hMenu, MENU_MAIN, "&Multiline Ultimate Assembler\tCtrl+M");
+	_plugin_menuaddseparator(g_hMenu);
+	_plugin_menuaddentry(g_hMenu, MENU_OPTIONS, "&Options");
+	_plugin_menuaddseparator(g_hMenu);
+	_plugin_menuaddentry(g_hMenu, MENU_HELP, "&Help");
+	_plugin_menuaddentry(g_hMenu, MENU_ABOUT, "&About");
 
-	_plugin_menuaddentry(hMenuDisasm, MENU_CPU_DISASM, "&Disassemble selection\tCtrl+Shift+M");
+	_plugin_menuaddentry(g_hMenuDisasm, MENU_CPU_DISASM, "&Disassemble selection\tCtrl+Shift+M");
+}
+
+void _CBPLUGIN(CBTYPE cbType, void* callbackInfo)
+{
+    if (cbType == CB_ATTACH)
+    {
+        PLUG_CB_ATTACH* cb = (PLUG_CB_ATTACH*)callbackInfo;
+        g_dwProcessId = cb->dwProcessId;
+    }
+    if (cbType == CB_DETACH)
+    {
+        g_dwProcessId = 0;
+    }
+    if (cbType == CB_CREATEPROCESS)
+    {
+        PLUG_CB_CREATEPROCESS* cb = (PLUG_CB_CREATEPROCESS*)callbackInfo;
+        g_dwProcessId = cb->fdProcessInfo->dwProcessId;
+    }
+    if (cbType == CB_EXITPROCESS)
+    {
+        PLUG_CB_EXITPROCESS* cb = (PLUG_CB_EXITPROCESS*)callbackInfo;
+        g_dwProcessId = 0;
+    }
+}
+
+int GetDebugeeProcessId()
+{
+    return g_dwProcessId;
 }
 
 DLL_EXPORT bool pluginit(PLUG_INITSTRUCT* initStruct)
@@ -69,7 +104,7 @@ DLL_EXPORT bool pluginit(PLUG_INITSTRUCT* initStruct)
 	initStruct->pluginVersion = GetPluginVersion();
 	initStruct->sdkVersion = PLUG_SDKVERSION;
 	lstrcpy(initStruct->pluginName, DEF_PLUGINNAME);
-	pluginHandle = initStruct->pluginHandle;
+	g_pluginHandle = initStruct->pluginHandle;
 
 	char *pError = PluginInit(hDllInst);
 	if(pError)
@@ -81,9 +116,13 @@ DLL_EXPORT bool pluginit(PLUG_INITSTRUCT* initStruct)
 	_plugin_logputs("Multiline Ultimate Assembler v" DEF_VERSION);
 	_plugin_logputs("  " DEF_COPYRIGHT);
 
-	_plugin_registercommand(pluginHandle, "multiasm_show", CmdShow, false);
-	_plugin_registercommand(pluginHandle, "multiasm_disasm_selection", CmdDisasmSelection, true);
-	_plugin_registercommand(pluginHandle, "multiasm_close", CmdClose, false);
+	_plugin_registercommand(g_pluginHandle, "multiasm_show", CmdShow, false);
+	_plugin_registercommand(g_pluginHandle, "multiasm_disasm_selection", CmdDisasmSelection, true);
+	_plugin_registercommand(g_pluginHandle, "multiasm_close", CmdClose, false);
+    _plugin_registercallback(g_pluginHandle, CB_ATTACH, _CBPLUGIN);
+    _plugin_registercallback(g_pluginHandle, CB_DETACH, _CBPLUGIN);
+    _plugin_registercallback(g_pluginHandle, CB_CREATEPROCESS, _CBPLUGIN);
+    _plugin_registercallback(g_pluginHandle, CB_EXITPROCESS, _CBPLUGIN);
 
 	return true;
 }
@@ -110,8 +149,12 @@ static int GetPluginVersion()
 
 DLL_EXPORT bool plugstop()
 {
-	_plugin_menuclear(hMenu);
-	_plugin_menuclear(hMenuDisasm);
+	_plugin_menuclear(g_hMenu);
+	_plugin_menuclear(g_hMenuDisasm);
+
+	_plugin_unregistercommand(g_pluginHandle, "multiasm_show");
+	_plugin_unregistercommand(g_pluginHandle, "multiasm_disasm_selection");
+	_plugin_unregistercommand(g_pluginHandle, "multiasm_close");
 
 	_plugin_unregistercommand(pluginHandle, "multiasm_show");
 	_plugin_unregistercommand(pluginHandle, "multiasm_disasm_selection");

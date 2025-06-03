@@ -13,6 +13,7 @@ typedef struct _disasm_cmd_node {
 	DWORD_PTR dwConst[3];
 	TCHAR *lpComment;
 	TCHAR *lpLabel;
+	DWORD dwCommandSize;
 } DISASM_CMD_NODE;
 
 typedef struct _disasm_cmd_head {

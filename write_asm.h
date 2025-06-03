@@ -50,6 +50,8 @@ typedef struct _anon_label_head {
 typedef struct _cmd_block_node {
 	struct _cmd_block_node *next;
 	DWORD_PTR dwAddress;
+    BOOL bAddressFromVirtualAlloc;
+    SIZE_T nAddressAllocSize;
 	SIZE_T nSize;
 	CMD_HEAD cmd_head;
 	ANON_LABEL_HEAD anon_label_head;
@@ -71,15 +73,16 @@ LONG_PTR WriteAsm(TCHAR *lpText, TCHAR *lpError);
 
 // 1
 static TCHAR *TextToData(LABEL_HEAD *p_label_head, CMD_BLOCK_HEAD *p_cmd_block_head, TCHAR *lpText, TCHAR *lpError);
-static LONG_PTR AddressToData(CMD_BLOCK_HEAD *p_cmd_block_head, CMD_BLOCK_NODE **p_cmd_block_node,
+static LONG_PTR AddressToData(LABEL_HEAD *p_label_head, CMD_BLOCK_HEAD *p_cmd_block_head, CMD_BLOCK_NODE **p_cmd_block_node,
 	DWORD_PTR *pdwAddress, DWORD_PTR *pdwEndAddress, DWORD_PTR *pdwBaseAddress, TCHAR *lpText, TCHAR *lpError);
 static LONG_PTR LabelToData(LABEL_HEAD *p_label_head, CMD_BLOCK_NODE *cmd_block_node, DWORD_PTR *pdwAddress, TCHAR *lpText, TCHAR *lpError);
 static LONG_PTR SpecialCommandToData(CMD_BLOCK_NODE *cmd_block_node, DWORD_PTR *pdwAddress, DWORD_PTR dwEndAddress, TCHAR *lpText, TCHAR *lpError);
 static LONG_PTR CommandToData(CMD_BLOCK_NODE *cmd_block_node, DWORD_PTR *pdwAddress, DWORD_PTR dwBaseAddress, TCHAR *lpText, TCHAR *lpError);
 
 static BOOL IsInComment(TCHAR *pchCommentChar, TCHAR *lpText, TCHAR *lpError);
-static LONG_PTR ParseAddress(TCHAR *lpText, DWORD_PTR *pdwAddress, DWORD_PTR *pdwEndAddress, DWORD_PTR *pdwBaseAddress, TCHAR *lpError);
-static BOOL NewCmdBlock(CMD_BLOCK_HEAD *p_cmd_block_head, DWORD_PTR dwAddress, TCHAR *lpError);
+static LONG_PTR ParseAddress(LABEL_HEAD *p_label_head, TCHAR *lpText, DWORD_PTR *pdwAddress, BOOL* bFromAlloc, SIZE_T* nAllocSize, DWORD_PTR *pdwEndAddress, DWORD_PTR *pdwBaseAddress, TCHAR *lpError);
+static BOOL NewCmdBlock(CMD_BLOCK_HEAD *p_cmd_block_head, DWORD_PTR dwAddress, BOOL bFromAlloc, SIZE_T nAllocSize, TCHAR *lpError);
+static LONG_PTR AllocAddress(LABEL_HEAD *p_label_head, TCHAR *lpText, DWORD_PTR *pdwAddress, SIZE_T* pAllocSize, TCHAR *lpError);
 static LONG_PTR ParseAnonLabel(TCHAR *lpText, DWORD_PTR dwAddress, ANON_LABEL_HEAD *p_anon_label_head, TCHAR *lpError);
 static LONG_PTR ParseLabel(TCHAR *lpText, DWORD_PTR dwAddress, LABEL_HEAD *p_label_head, DWORD_PTR *pdwPaddingSize, TCHAR *lpError);
 static LONG_PTR ParseAsciiString(TCHAR *lpText, CMD_HEAD *p_cmd_head, SIZE_T *pnSizeInBytes, TCHAR *lpError);

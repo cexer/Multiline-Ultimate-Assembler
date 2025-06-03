@@ -218,7 +218,7 @@ static DWORD ProcessCommand(BYTE *pCode, SIZE_T nSize, DWORD_PTR dwAddress, BYTE
 
 	dasm_cmd->lpComment = NULL;
 	dasm_cmd->lpLabel = NULL;
-
+	dasm_cmd->dwCommandSize = dwCommandSize;
 	dasm_cmd->next = NULL;
 
 	p_dasm_head->last->next = dasm_cmd;
@@ -303,7 +303,7 @@ static DWORD ProcessData(BYTE *pCode, SIZE_T nSize, DWORD_PTR dwAddress,
 		dasm_cmd->dwConst[i] = 0;
 
 	dasm_cmd->dwAddress = 0;
-
+	dasm_cmd->dwCommandSize = dwCommandSize;
 	dasm_cmd->lpComment = NULL;
 	dasm_cmd->lpLabel = NULL;
 
