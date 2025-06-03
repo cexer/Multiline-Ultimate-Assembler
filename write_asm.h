@@ -50,7 +50,7 @@ typedef struct _anon_label_head {
 typedef struct _cmd_block_node {
 	struct _cmd_block_node *next;
 	DWORD_PTR dwAddress;
-    BOOL bAddressFromVirtualAlloc;
+    BOOL bAddressFromAlloc;
     SIZE_T nAddressAllocSize;
 	SIZE_T nSize;
 	CMD_HEAD cmd_head;

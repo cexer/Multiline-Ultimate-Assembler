@@ -6,16 +6,10 @@
 
 extern HINSTANCE hDllInst;
 
-<<<<<<< HEAD
-static int pluginHandle;
-static int hMenu;
-static int hMenuDisasm;
-=======
 static int g_pluginHandle;
 static int g_hMenu;
 static int g_hMenuDisasm;;
 static int g_dwProcessId;
->>>>>>> 0c6b563 (support automate alloc code memory)
 
 #ifndef DLL_EXPORT
 #define DLL_EXPORT __declspec(dllexport)
@@ -155,10 +149,6 @@ DLL_EXPORT bool plugstop()
 	_plugin_unregistercommand(g_pluginHandle, "multiasm_show");
 	_plugin_unregistercommand(g_pluginHandle, "multiasm_disasm_selection");
 	_plugin_unregistercommand(g_pluginHandle, "multiasm_close");
-
-	_plugin_unregistercommand(pluginHandle, "multiasm_show");
-	_plugin_unregistercommand(pluginHandle, "multiasm_disasm_selection");
-	_plugin_unregistercommand(pluginHandle, "multiasm_close");
 
 	AssemblerCloseDlg();
 	PluginExit();

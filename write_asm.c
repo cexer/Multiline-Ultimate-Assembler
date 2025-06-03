@@ -420,7 +420,7 @@ static BOOL NewCmdBlock(CMD_BLOCK_HEAD *p_cmd_block_head, DWORD_PTR dwAddress, B
 		return FALSE;
 	}
 
-    cmd_block_node->bAddressFromVirtualAlloc = bFromAlloc;
+    cmd_block_node->bAddressFromAlloc = bFromAlloc;
     cmd_block_node->nAddressAllocSize = nSize;
 	cmd_block_node->dwAddress = dwAddress;
 	cmd_block_node->nSize = 0;
@@ -2069,6 +2069,7 @@ BOOL CALLBACK _PSYM_ENUMMODULES_CALLBACK(
 }
 
 
+int GetDebugeeProcessId();
 static LONG_PTR AllocAddress(LABEL_HEAD *p_label_head, TCHAR *lpText, DWORD_PTR *pdwAddress, SIZE_T* pAllocSize, TCHAR *lpError)
 {
     TCHAR *p;
@@ -2170,20 +2171,13 @@ static LONG_PTR AllocAddress(LABEL_HEAD *p_label_head, TCHAR *lpText, DWORD_PTR 
         int dwDebugeeProcessId;
         DWORD_PTR hDebugeeProcessMem;
 
-    #if defined(_WIN64)
-        DWORD_PTR hDebugeeProcessModuleBase;
-    #else
-        DWORD hDebugeeProcessModuleBase;
-    #endif
-
         MEMORY_BASIC_INFORMATION info;
-
-        PLUGIN_MODULE hDebugeeProcessModule;
 
         dwDebugeeProcessId = GetDebugeeProcessId();
         hDebugeeProcessHandle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwDebugeeProcessId);
         if (!hDebugeeProcessHandle)
         {
+			CloseHandle(hDebugeeProcessHandle);
             wsprintf(lpError, _T("OpenProcess '%d' failed, error=%d"), dwDebugeeProcessId, GetLastError());
             return 0;
         }
@@ -2191,6 +2185,7 @@ static LONG_PTR AllocAddress(LABEL_HEAD *p_label_head, TCHAR *lpText, DWORD_PTR 
         hDebugeeProcessMem = (DWORD_PTR)VirtualAllocEx(hDebugeeProcessHandle, NULL, dwAddressSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
         if (!hDebugeeProcessMem)
         {
+			CloseHandle(hDebugeeProcessHandle);
             wsprintf(lpError, _T("VirtualAllocEx in process %d failed, error=%d"), dwDebugeeProcessId, GetLastError());
             return 0;
         }
@@ -2627,13 +2622,13 @@ static TCHAR *PatchCommands(CMD_BLOCK_HEAD *p_cmd_block_head, TCHAR *lpError)
 		if(cmd_block_node->nSize > 0)
 		{
 			memory = FindMemory(cmd_block_node->dwAddress);
-			if(!memory && !cmd_block_node->bAddressFromVirtualAlloc)
+			if(!memory && !cmd_block_node->bAddressFromAlloc)
 			{
 				wsprintf(lpError, _T("Failed to find memory block for address 0x" HEXPTR_PADDED), cmd_block_node->dwAddress);
 				return cmd_block_node->cmd_head.next->lpCommand;
 			}
 
-            if (cmd_block_node->bAddressFromVirtualAlloc)
+            if (cmd_block_node->bAddressFromAlloc)
             {
                 dwMemoryBase = cmd_block_node->dwAddress;
                 nMemorySize = cmd_block_node->nAddressAllocSize;
