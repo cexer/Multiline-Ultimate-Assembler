@@ -2075,11 +2075,7 @@ static LONG_PTR AllocAddress(LABEL_HEAD *p_label_head, TCHAR *lpText, DWORD_PTR 
     TCHAR *p;
     TCHAR *pAddressNameStart, *pAddressNameEnd;
     TCHAR *pSizeStart, *pSizeEnd;
-    PLUGIN_MODULE module;
-    DWORD_PTR dwAddress;
     int dwAddressSize;
-    LONG_PTR result;
-    TCHAR c;
     TCHAR szSize[20];
     TCHAR szName[20];
     LABEL_NODE* label_node;
@@ -2170,8 +2166,6 @@ static LONG_PTR AllocAddress(LABEL_HEAD *p_label_head, TCHAR *lpText, DWORD_PTR 
         HANDLE hDebugeeProcessHandle;
         int dwDebugeeProcessId;
         DWORD_PTR hDebugeeProcessMem;
-
-        MEMORY_BASIC_INFORMATION info;
 
         dwDebugeeProcessId = GetDebugeeProcessId();
         hDebugeeProcessHandle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwDebugeeProcessId);
